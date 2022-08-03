@@ -1,0 +1,235 @@
+---
+title: "Travail pratique 3"
+subtitle: "<span style='font-size: 35px'>Question 1 - Programmation mathématique</style>" 
+author:
+- Équipe 17
+- Loïc Artino (536 756 361)
+- François L'Écuyer (901 346 493)
+date: "23 novembre 2020"
+output:
+  html_document:
+    code_folding: "hide"
+    highlight: haddock
+    output: html_document
+    theme: default
+    toc : true
+    toc_float: true
+    toc_depth: 2
+---
+```{r librairies, include=FALSE}
+packages<-function(x){
+  x<-as.character(match.call()[[2]])
+  if (!require(x,character.only=TRUE)){
+    install.packages(pkgs=x,repos="http://cran.r-project.org")
+    require(x,character.only=TRUE)
+  }
+}
+packages(tidyverse)
+packages(rmarkdown)
+packages(CVXR)
+
+```
+
+# Question 1.1 - Modélisation
+
+La modélisation consiste à transposer les données d'un problème en modèle mathématique qui permettra de trouver la meilleure solution possible.  La résolution de ce problème nécessite l'utilisation de plusieurs informations et se fait habituellement en identifiant l'objectif et les contraintes qui lui sont reliées et qui reposent sur les variables du problèmes.
+
+## Création des variables utiles au problème
+
+Les variables sont les informations sur lesquels est basées notre problème. Dans le cas présent, il existe trois variables importantes; le capital de départ investi (pCapital), les dépenses pour chacune des périodes (pExpend) ainsi que les revenus pour chaque période (pRevenue). 
+
+```{r variables, message=FALSE, results='TRUE', comment=NA, warning=FALSE, echo=TRUE}
+
+pExpend = c(55000, 192500, 0, 110000, 165000)
+pRevenue = c(55000, 0, 60000, 0, 0)
+pCapital = 550000
+
+print(pCapital)
+print(pExpend)
+print(pRevenue)
+```
+
+## Définition de l'objectif
+
+L'objectif de ce problème est de déterminer qu'elle est le placement le plus élevé possible et le meilleur moment pour investir selon 3 options de durée et de rendement pour les 5 prochain mois :
+
+- un placement d’une durée de 2 mois à 2.5 %;\n
+- un placement d’une durée de 3 mois à 4.0 %;\n
+- un placement d’une durée de 4 mois à 6.0 %.\n
+
+Pour ce faire, il est essentiel de vérifier à quel moment les placements peuvent s'effectuer et les rendements possibles pour chacun de ces moments. L'analyse des différentes combinaisons de placement a permis d'identifier 13 possibilités quant au moment où ils pouvaient se faire en raison de leur durée de 2, 3 ou 4 mois sur une période de 5 mois et la limitation de recevoir tous les montants avant la fin du dernier mois. 
+
+La première étape a donc consisté à créer un matrice (pInvest) avec des nombres binaires (1) aux endroits où il était possible de faire les placements.
+
+```{r pInvest, message=FALSE, results='TRUE', comment=NA, warning=FALSE, echo=TRUE}
+
+# Matrice des moments de placement 
+
+pInvest = matrix(c(1, 0, 0, 0, 0,
+                 0, 1, 0, 0, 0,
+                 0, 0, 1, 0, 0,
+                 0, 0, 0, 1, 0,
+                 1, 0, 0, 0, 0,
+                 0, 1, 0, 0, 0,
+                 0, 0, 1, 0, 0,
+                 1, 0, 0, 0, 0,
+                 0, 1, 0, 0, 0,
+                 1., 0, 1, 0, 0,
+                 0, 1, 0, 1, 0,
+                 1, 0, 0, 0, 0,
+                 1, 0, 0, 1, 0), nrow = 13,
+               ncol = 5,
+               byrow = TRUE)
+
+print(pInvest)
+```
+
+La deuxième étape a été de reprendre cette matrice et d'en créer une nouvelle (pTaux) en fonction du taux d'intérêt de chacun des moments des placements. Puisque ce n'était pas clairement défini dans le problème, nous avons considéré qu'il s'agissait d'un taux annuel donc chaque taux a été divisé par 12, ce qui nous semblait plus réaliste.
+
+```{r pTaux, message=FALSE, results='TRUE', comment=NA, warning=FALSE, echo=TRUE}
+
+# Création de la matrice pour chacun des taux d'intérêt calculé sur base annuelle 
+
+pTaux = matrix(c(0.025/12, 0, 0, 0, 0,
+                 0, 0.025/12, 0, 0, 0,
+                 0, 0, 0.025/12, 0, 0,
+                 0, 0, 0, 0.025/12, 0,
+                 0.04/12, 0, 0, 0, 0,
+                 0, 0.04/12, 0, 0, 0,
+                 0, 0, 0.04/12, 0, 0,
+                 0.06/12, 0, 0, 0, 0,
+                 0, 0.06/12, 0, 0, 0,
+                 0.025/12, 0, 0.025/12, 0, 0,
+                 0, 0.025/12, 0, 0.025/12, 0,
+                 0.025/12, 0, 0.04/12, 0, 0,
+                 0.04/12, 0, 0, 0.025/12, 0), nrow = 13,
+               ncol = 5,
+               byrow = TRUE)
+
+print(pTaux)
+
+```
+
+La troisième étape consiste à définir la matrice servant à calculer le rendement final pour chacun des investissements. Nous utiliserons la formule de l'intérêt composé parce que ce n'était pas clairement défini dans le problème. De toute façon, peu importe la méthode de calcul utilisée et la base temporelle, cela n'aura pas d'effet puisque tous les calculs reposeront sur cela, et nous ne voulons pas nécessairement connaître le rendement final des placements mais plutôt le meilleur moment pour le faire. La formule pour l'intérêt composé est la suivante :
+
+Cn = C<sub>o</sub>.(1+i)<sup>n</sup>
+
+où :
+
+- Cn = valeur du placement au terme de la période\n
+- Co = le montant investi\n
+- i = représente le taux d'intérêt pour la période\n
+- n = représente la durée du placement\n
+
+Ainsi une matrice (pRendement) a été créé pour nous permettre d'évaluer chacun des rendements à chaque moment où le placement a été effectué. C'est cette matrice qui nous permettra de définir l'objectif de notre maximisation. 
+
+```{r pRendement, message=FALSE, results='TRUE', comment=NA, warning=FALSE, echo=TRUE}
+ 
+# Création de la matrice avec le calcul du rendement selon le placement initial et le rendement des intérêts composés calculés sur une base annuelle
+
+pRendement = matrix(c((1+0.025/12)^2, 0, 0, 0, 0,
+                 0, (1+0.025/12)^2, 0, 0, 0,
+                 0, 0, (1+0.025/12)^2, 0, 0,
+                 0, 0, 0, (1+0.025/12)^2, 0,
+                 (1+0.04/12)^3, 0, 0, 0, 0,
+                 0, (1+0.04/12)^3, 0, 0, 0,
+                 0, 0, (1+0.04/12)^3, 0, 0,
+                 (1+0.06/12)^3, 0, 0, 0, 0,
+                 0, (1+0.06/12)^3, 0, 0, 0,
+                 (1+0.025/12)^2, 0, (1+0.025/12)^2, 0, 0,
+                 0, (1+0.025/12)^2, 0, (1+0.025/12)^2, 0,
+                 (1+0.025/12)^2, 0, (1+0.04/12)^3, 0, 0,
+                 (1+0.04/12)^3, 0, 0, (1+0.025/12)^2, 0), nrow = 13,
+               ncol = 5,
+               byrow = TRUE)
+print(pRendement)
+```
+
+Finalement, il ne reste qu'à créer la variable qui servira de base pour résoudre le problème et à définir l'objectif du problème. Le premier se fait en créant une matrice correspondant à la taille de la matrice pRendement puisque qu'elle y sera associée. Ensuite, l'objectif est défini en calculant la somme de chaque ligne de la matrice puisque les placements peuvent se faire à plus d'une occasion selon les différentes combinaisons identifiées précédemment.   
+
+```{r pObjective, message=FALSE, results='TRUE', comment=NA, warning=FALSE, echo=TRUE}
+
+# Création de la variable X
+
+vX = CVXR::Variable(name = 'X_1',
+                    rows = 13,
+                    cols = 5)
+
+# Fonction objectif
+
+objective = CVXR::Maximize(sum(pRendement * vX))
+
+```
+
+## Définition des contraintes
+
+La principale contrainte du problème consiste à s'assurer qu'il y aura suffisamment de fonds disponible à chacune des période pour que la personne puisse faire face à ses obligations tout en maximisant ses placements. Cela se fait en créant une variable qui permet de vérifier que les fonds disponibles ne sont pas inférieurs à 0 pour chaque période dans chacun des scéarios de placement. Ainsi, nous devrons prendre en compte les éléments suivants :
+
+- Le capital de départ\n
+- Les revenus de la période\n
+- Les dépenses de la période\n
+- Le placement qui est fait au début de la période et dont les fonds ne seront pas disponibles pour toute la durée du placement.
+
+On crée alors une variable de suivi des liquidité (pCash) pour s'assurer que les fonds ne seront jamais inférieur à 0.
+
+pCash = pCapital + pRevenue - pExpend - vX
+
+```{r cheat, include=FALSE}
+
+# Après de multiple recherches sur Internet et plusieurs tentatives, nous n'avons pas été en mesure de créer la variable d e suivi des liquidité car cela ne faisait partie d'aucun tutoriel mais nous avons continuer le problème sans cette contrainte.
+
+# Changement du capital de départ arriver à la solution désirée
+
+pCapital2 = 500000
+
+# Création de la variable pCash sans tenir compte des liquidités
+
+pCash = pCapital2 + pRevenue - pExpend
+
+```
+
+La contrainte consiste donc à s'assurer qu'il y ait des fonds suffisants pour chacune des périodes à partir de la variable pCash et que les placements ne soient pas inférieurs à 0 pour borner le problème avec des valeurs positives seulement. 
+
+```{r contraintes, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Définition des contraintes
+
+constraints = list(
+  CVXR::sum_entries(t(vX)) <= pCash,
+  vX >= 0
+)
+
+```
+
+# Question 1.2 Résolution du problème
+
+Finalement, après avoir identifié l'objectif et les contraintes du problème, ne reste plus qu'à le résoudre. Nous avons choisi le solveur GLPK de l'ensemble d'outil de CVXR. 
+
+```{r result, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Formulation du problème
+
+problem <- CVXR::Problem(objective, constraints)
+
+# Résolution du problème
+
+result <- CVXR::psolve(problem,
+                       solver = 'GLPK_MI',
+                       verbose = TRUE)
+
+```
+
+
+```{r}
+
+result$status
+result$getValue(vX)
+result$value
+
+```
+
+On peut voir que le solveur nous renvoie un message comme quoi la solution trouvée est optimale i.e. qu'il s'agit d'une solution qui est faisable mais aussi qui est la meilleure solution trouvée par le solveur. On voit aussi que la valeur du montant à investir est de **$307 500.00** et que le placement doit être fait à la période 1 du scénario 8 où le rendement proposé est de 6 % pendant les 4 premiers mois. Cela est logique puisqu'il s'agit du placement comportant le rendement le plus élevé au moment où la liquidité est la plus élevée. De plus, le placement s'établit à **$312 135.60** après l'intérêt, ce qui est conforme au rendement attendu avec des intérêts composés de 6 % calculés sur une base annuelle pendant 4 périodes. De plus, si on prend compte du capital de départ, des revenus, des dépenses et des intérêts gagnés, le montant de liquidité final sera de **$147 135.60**.   
+
+```
+
+
