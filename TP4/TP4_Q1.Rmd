@@ -1,0 +1,473 @@
+---
+title: "Travail pratique 3"
+subtitle: "<span style='font-size: 35px'>Question 1 - Persistance des données</style>" 
+author:
+- Équipe 13
+- Loïc Artino (536 756 361)
+- François L'Écuyer (901 346 493)
+date: "11 décembre 2020"
+output:
+  html_document:
+    code_folding: "hide"
+    highlight: haddock
+    output: html_document
+    theme: default
+    toc : true
+    toc_float: true
+    toc_depth: 2
+---
+```{r librairies, include=FALSE}
+packages<-function(x){
+  x<-as.character(match.call()[[2]])
+  if (!require(x,character.only=TRUE)){
+    install.packages(pkgs=x,repos="http://cran.r-project.org")
+    require(x,character.only=TRUE)
+  }
+}
+packages(tidyverse)
+packages(rmarkdown)
+packages(RSQLite)
+packages(DBI)
+
+```
+
+
+# Question 1.1 - Base de données intègre: ménage pour rendre le tout intègre
+
+Il y a trois étapes préalables à la création de la base de données :
+
+- La création des tables à partir des fichiers importées ;
+- La vérification de la cohérence et de l'intégrité d'entité de chaque table ;
+- La vérification de l'intégrité référentielle entre les tables.
+
+## Importation des données
+
+La première étape consiste à créer les tables à partir de fichiers importés de format CSV.
+
+```{r import, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Importation des données
+
+data_cat = read_csv("data/Q1_categories.csv")
+data_com = read_csv("data/Q1_companies.csv")
+data_loc = read_csv("data/Q1_locations.csv")
+data_typ = read_csv("data/Q1_types.csv")
+
+
+```
+
+Suite à ces opérations, on peut voir les premiers enregistrements des quatre tables qui ont été créées dans les Tableaux 1 à 4.
+
+`r knitr::kable(head(data_cat, 5), caption = "**Tableau 1 - Liste partielle des catégories de compagnies**")`
+
+`r knitr::kable(head(data_com, 5), caption = "**Tableau 2 - Liste partielle des compagnies**")`
+
+`r knitr::kable(head(data_loc, 5), caption = "**Tableau 3 - Liste partielle des localisations des compagnies**")`
+
+`r knitr::kable(head(data_typ, 5), caption = "**Tableau 4 - Liste partielle des types de compagnies**")`
+
+La deuxième étape consiste à vérifier la cohérence et l'intégrité d'entité de chaque table en s'assurant que chaque table contient des données de qualité et une clé primaire unique.
+
+## Cohérence et intégrité d'entité de la table data_cat
+
+La vérification de la cohérence se fait de façon visuelle en vérifiant si certaines données n'ont pas été créées de façon inconstante. Cela a permis de constater qu'il existait des enregistrements qui étaient effectivement problématiques. Le premier enregistrement problématique est **Business & Legal Services** qui ressemble énormément à l'enregistrement **Business and Legal Services**. Il est évident qu'on parle ici de la même chose donc nous allons supprimer l'enregistrement **Business and Legal Services**. Par ailleurs, les enregistrements **Environment** et **Weather** sont représentés de façon individuelle alors qu'il existe un champ **Environment & Weather**. Nous allons donc inclure les enregistrements **Environment** et **Weather** dans l'enregistrement **Environment and Weather ** même si cette décision revient souvent à la personne qui utilisera la base de données selon la forme des données qu'elle désire extraire de la base de données. Il est important de noter que puisque le champ **category** de la table **data_cat** est la clé étrangère de la table **data_com**, il va falloir faire ces mêmes transformations dans la table **data_com** lorsque nous vérifierons l'intégrité référentielle de la base de données.
+
+```{r data_names, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Changement des enregistrements qui ressemblent à un autre enregistrement
+
+data_cat$category[data_cat$category == "Business and Legal Services"] <- "Business & Legal Services"
+data_cat$category[data_cat$category == "Environment"] <- "Environment & Weather"
+data_cat$category[data_cat$category == "Weather"] <- "Environment & Weather"
+
+```
+
+Puisque la table **data_cat** est constituée d'un seul champ, implicitement ce champ sera la clé unique si chaque élément est différent des autres. Il est évident que suite aux transformations précédentes, il y aura des enregistrements en doublons. Pour régler ce problème, nous procéderons directement à la suppression des doublons avec la fonction **duplicated** puis nous vérifierons qu'il ne subsiste pas de doublons dans la table. De plus, nous allons supprimer les éléments manquants **NA** du champ **category** puisqu'il s'agit d'une clé primaire.
+
+```{r data_catCP, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Suppression des doublons de la table data_cat
+
+data_cat <- data_cat[!duplicated(data_cat),]
+
+# Vérification de l'unicité des éléments de la clé primaire de la table data_cat
+
+data_cat %>%
+  count(category) %>%
+  filter(n > 1) %>%
+  nrow()
+
+# Suppression des éléments manquants (NA)
+
+data_cat <- na.omit(data_cat)
+
+```
+
+Suite à ces opérations, on peut constater qu'il subsiste **`r (data_cat %>% count(category) %>% filter(n > 1) %>% nrow())`** doublon(s) dans le champ **category** de la table **data_cat** ainsi que **`r sum(is.na(data_cat))`** valeur(s) manquante(s). Ensuite, nous devons vérifier si le type du champ **category** est bien celui attendu.
+
+```{r data_catColumn, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Vérification du type des colonnes de la table data_cat
+
+data_cat %>% map(typeof)
+
+```
+
+La vérification du type du champ **category**, nous permet de constater qu'il est de type **`r data_cat %>% map(typeof)`**, ce qui est conforme à ce qui est attendu. Suite à ces opérations, on peut les éléments de la table **data_cat** dans le Tableau 5. 
+
+`r knitr::kable(view(data_cat), caption = "**Tableau 5 - Table data_cat**")`
+
+## Cohérence et intégrité d'entité de la table data_typ
+
+Les mêmes étapes de vérification de la cohérence que la table **data_cat** ont été suivies pour la table **data_typ** i.e une vérification visuelle de la table, la suppression des doublons et la vérification du type des champs. Cependant, la fonction **distinct** a été utilisée dans ce cas parce que les données du champs **description** différaient avec la même clé primaire.
+
+```{r data_typ, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Suppression des doublons de la table data_typ
+
+data_typ <- distinct(data_typ,type, .keep_all= TRUE)
+
+# Vérification de l'unicité des éléments de la clé primaire de la table data_typ
+
+data_typ %>%
+  count(type) %>%
+  filter(n > 1) %>%
+  nrow()
+
+# Vérification du type des colonnes de la table data_typ
+
+data_typ %>% map(typeof)
+
+```
+
+Suite à ces opérations, on peut constater qu'il subsiste **`r (data_typ %>% count(type) %>% filter(n > 1) %>% nrow())`** doublon(s) dans le champ **type** de la table **data_typ**. La vérification du type des champs **type** et **description**, nous permet aussi de constater qu'ils sont de type **`r data_typ %>% map(typeof)`**, ce qui est conforme à ce qui est attendu pour ces champs. On peut voir les éléments de la table **data_typ** dans le Tableau 6.
+
+`r knitr::kable(view(data_typ), caption = "**Tableau 6 - Table data_typ**")`
+
+## Cohérence et intégrité d'entité de la table data_loc
+
+Ici aussi, les mêmes étapes de vérification de la cohérence que les tables précédentes ont été suivies pour la table **data_loc** i.e une vérification visuelle de la table, la suppression des doublons et la vérification du type des champs. De plus, un champ numérique séquentiel a été créé pour servir de clé primaire.
+
+```{r data_loc, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Changement des enregistrements qui ressemblent à un autre enregistrement
+
+data_loc$city[data_loc$city == "Berkely"] <- "Berkeley"
+data_loc$city[data_loc$city == "Boston, MA"] <- "Boston"
+data_loc$city[data_loc$city == "Denver, CO"] <- "Denver"
+data_loc$city[data_loc$city == "St Louis"] <- "St. Louis"
+data_loc$city[data_loc$city == "Washington DC"] <- "Washington"
+data_loc$city[data_loc$city == "Log Angeles"] <- "Los Angeles"	
+
+# Suppression des doublons de la table data_loc
+
+data_loc <- data_loc[!duplicated(data_loc),]
+
+# Ajout de la colonne de la clé primaire numérique
+
+data_loc <-
+  data_loc %>%
+  mutate(location_id = row_number())
+
+# Vérification de l'unicité des éléments de la clé primaire de la table data_loc
+
+data_loc %>%
+  count(location_id) %>%
+  filter(n > 1) %>%
+  nrow()
+
+# Vérification du type des colonnes de la table data_loc
+
+data_loc %>% map(typeof)
+
+```
+
+Suite à ces opérations, on peut constater qu'il subsiste évidemment **`r (data_loc %>% count(location_id) %>% filter(n > 1) %>% nrow())`** doublon(s) dans le champ **location_id** qui constitue la clé primaire. La vérification du type des champs **type**, **description** et **location_id**, nous permet aussi de constater que les types sont **`r data_loc %>% map(typeof)`**, ce qui est conforme à ce qui est attendu pour ces champs. On peut voir les cinq premiers éléments de la table **data_loc** dans le Tableau 7.  
+
+`r knitr::kable(head(data_loc, 5), caption = "**Tableau 7 - Table data_loc**")`
+
+## Cohérence et intégrité d'entité de la table data_com
+
+La table **data_com** est plus complexe et il faut faire attention à ce que nous faisons dans la transformation des champs car plusieurs constituent des clés étrangères à relier avec d'autres tables. Comme pour les autres tables, la première étape a constitué à vérifier visuellement si certains enregistrements n'avaient pas été remplis de façon constante. ensuite, nous avons créé une clé primaire numérique qui n'existait pas actuellement dans la table pour finalement vérifier les types des champs.
+
+```{r data_com, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Changement des enregistrements qui ressemblent à un autre enregistrement
+
+data_com$city[data_com$city == "Berkely"] <- "Berkeley"
+data_com$city[data_com$city == "Boston, MA"] <- "Boston"
+data_com$city[data_com$city == "Denver, CO"] <- "Denver"
+data_com$city[data_com$city == "St Louis"] <- "St. Louis"
+data_com$city[data_com$city == "Washington DC"] <- "Washington"
+data_com$city[data_com$city == "Washington, D.C."] <- "Washington"
+data_com$city[data_com$city == "New York City"] <- "New York"
+data_com$city[data_com$city == "Log Angeles"] <- "Los Angeles"
+data_com$type[data_com$type == "partnership"] <- "Partnership"
+
+# Ajout de la colonne de la clé primaire numérique
+
+data_com <-
+  data_com %>%
+  mutate(id = row_number())
+
+# Vérification de l'unicité des éléments de la clé primaire de la table data_loc
+
+data_com %>%
+  count(id) %>%
+  filter(n > 1) %>%
+  nrow()
+
+# Vérification du type des colonnes de la table data_loc
+
+data_com %>% map(typeof)
+
+```
+
+Suite à ces opérations, on constate qu'il subsiste **`r (data_com %>% count(id) %>% filter(n > 1) %>% nrow())`** doublon(s) dans le champ **id** qui constitue la clé primaire. La vérification du type des champs,  nous permet de constater que les types sont **`r data_com %>% map(typeof)`**. Dans ce cas, nous devons modifier le format du champ **year_founded** du type **double** à **integer**.
+
+```{r data_com_type, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Modification du type du champ year_founded
+
+data_com <-
+data_com %>%
+mutate(year_founded = as.integer(year_founded))
+     
+# Vérification de l'unicité des éléments de la clé primaire de la table data_loc
+
+data_com %>%
+  count(id) %>%
+  filter(n > 1) %>%
+  nrow()
+
+```
+
+Suite à cette opération, on peut constater que le type du champ **year_founded** est maintenant de type **`r typeof(data_com$year_founded)`** et qu'il subsiste qu'il subsiste évidemment **`r (data_com %>% count(id) %>% filter(n > 1) %>% nrow())`** doublon(s) de la clé primaire. On peut voir les cinq premiers éléments de la table **data_loc** dans le Tableau 8. 
+
+`r knitr::kable(head(data_com, 5), caption = "**Tableau 8 - Table data_com**")`
+
+## Intégrité référentielle de la base de données
+
+La troisième étape avant de créer la base de données est de s'assurer s'assurer que l'intégrité référentielle est respectée entre toutes les tables au travers les clés primaires et étrangères. Dans le cas présent, il y a trois clés étrangères à vérifier dans la table **data_com** provenant des tables **data_cat**, **data_loc** et **data_typ**.
+
+### *Vérification de l'intégrité référentielle entre les tables data_com et data_cat*
+
+Pour vérifier que l'intégrité référentielle est respectée entre les tables **data_com** et **data_cat**, il faut s'assurer que toute les données de la clés étrangères de la table **data_com** soient présentes dans la table **data_cat**.
+
+```{r data_com_data_cat, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Vérification des données manquantes dans la table data_cat
+
+data_com %>%
+  anti_join(data_cat, by = c('company_category' = 'category')) %>%
+select(company_category) %>%
+distinct()
+
+```
+
+Suite à cette vérification, on peut constater que le seul enregistrement manquant est NA, ce qui est correct puisqu'il est possible que certains enregistrements de la table **data_com** ne contiennent pas d'information quant à la catégorie de client. On peut conclure que l'intégrité référentielle est respectée entre les tables **data_com** et **data_cat** et voir les éléments de la table **data_cat** dans le Tableau 9.  
+
+`r knitr::kable(view(data_cat), caption = "**Tableau 9 - Table data_cat**")`
+
+### *Vérification de l'intégrité référentielle entre les tables data_com et data_typ*
+
+Ici encore, pour vérifier que l'intégrité référentielle est respectée entre les tables **data_com** et **data_typ**, il faut s'assurer que toutes les données de la clé étrangère de la table **data_com** soient présentes dans la table **data_cat**.
+
+```{r data_com_data_cat_missings, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Vérification des données manquantes dans la table data_typ
+
+data_com %>%
+  anti_join(data_typ, by = c('type' = 'type')) %>%
+select(type) %>%
+distinct()
+
+```
+
+Suite à cette vérification, on peut voir qu'il manque cinq enregistrements de la **data_com** qui sont absents dans la table **data_typ** incluant la valeur NA. Nous allons donc ajouter les quatre valeurs suivantes :
+
+- Partnership          
+- Public (Federal-USGS)
+- nonprofit + commercial spinoff
+- sole proprietorship  
+- Permitting Assistance
+
+et enlever la valeur NA.
+
+```{r data_com_data_cat_add, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Ajout des valeurs manquantes
+
+values_to_add <-
+  data_com %>%
+  anti_join(data_typ, by = c('type' = 'type')) %>%
+  select(type) %>%
+  distinct()
+values_to_add <-
+  values_to_add %>%
+  rename(type = type)
+data_typ <-
+  data_typ %>%
+  bind_rows(values_to_add)
+
+# Suppression de la valeur NA
+
+ data_typ = data_typ[-c(4),]
+ 
+# Vérification des données manquantes dans la table data_typ
+
+data_com %>%
+  anti_join(data_typ, by = c('type' = 'type')) %>%
+select(type) %>%
+distinct()
+
+```
+
+Suite à ces opérations, on constate que la table **data_typ** contient huit enregistrements différentes qui sont toutes présentes dans la table **data_com** pour respecter l'intégrité référentielle. On peut voir les éléments de la table **data_typ** au tableau 10.  
+
+`r knitr::kable(view(data_typ), caption = "**Tableau 10 - Table data_typ**")`
+
+### *Vérification de l'intégrité référentielle entre les tables data_com et data_loc*
+
+Pour respecter l'intégrité référentielle entre la table **data_com** et la table **data_loc**, il faut arranger les champs **city** et **state** de la table **data_com** dans un nouveau champ nommé **location_id** qui servira de clé étrangère vers la clé primaire de la table **data_loc** puis vérifier que tous les champs de la table **data_loc** sont présents dans la table **data_com**.
+
+```{r data_com_data_loc, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Vérification des données manquantes dans la table data_loc
+
+data_com %>%
+  anti_join(data_loc, by = c('city' = 'city',
+                             'state' = 'state')) %>%
+  select(city, state) %>%
+  distinct()
+
+# Ajout des valeurs manquantes
+
+values_to_add_2 <-
+  data_com %>%
+  anti_join(data_loc, by = c('city' = 'city',
+                             'state' = 'state')) %>%
+  select(city, state) %>%
+  distinct()
+values_to_add_2 <-
+  values_to_add_2 %>%
+  rename(city = city)
+data_loc <-
+  data_loc %>%
+  bind_rows(values_to_add_2)
+
+# Actualisation de location_id
+
+  data_loc <- data_loc %>%
+    mutate(location_id = row_number())
+  
+# Création du champ location_id dans la table data_com
+  
+  data_com <- data_com %>%
+    left_join(data_loc, by = c('city' = 'city',
+                               'state' = 'state'))
+  
+# Suppression des colonnes city et state dans la table data_com
+ 
+  data_com <- data_com %>%
+    select(-city, -state)
+  
+    
+```
+
+Suite à ces opérations, on constate que plusieurs enregistrements ont été créées dans la table **data_loc** particulièrement ceux dont seul l'état étaient présent table **data_com**. On peut voir,  les cinq premiers éléments de la table **data_loc** au Tableau 11.  
+
+`r knitr::kable(head(data_loc,5), caption = "**Tableau 11 - Table data_loc**")`
+
+# Question 1.2 - Base de données: création de la base de données
+
+Après s'est assuré de la qualité des données, de l'intégrité d'entité de chaque table et de l'intégrité référentielle de la base de données, nous pouvons maintenant créer la base de données SQLite en incluant les quatre tables qu'elle doit contenir soit **categories**, **companies**, **locations** et **types**. Puisqu'il y a un traitement à faire manuellement dans SQLite au niveau des clés primaires et étrangères de la base de données, nous avons aussi créé une boucle dans le cas où la base de données était déjà existante pour ne pas l'écraser à chaque fois.
+
+```{r db_creation, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Création de la base de données
+
+if (file.exists("db_persistence.sqlite") == TRUE) {
+mydb <- dbConnect(RSQLite::SQLite(),'db_persistence.sqlite')
+} else {
+mydb <- dbConnect(RSQLite::SQLite(), 'db_persistence.sqlite')
+
+dbWriteTable(mydb, "categories", data_cat)
+dbWriteTable(mydb, "companies", data_com)
+dbWriteTable(mydb, "locations", data_loc)
+dbWriteTable(mydb, "types", data_typ)
+}
+
+# Déconnexion de la base de données
+
+dbDisconnect(mydb)
+
+```
+
+# Question 1.3 - Base de données: configuration de la base de données
+
+La configuration de la base de données se fait directement dans le système de gestion de bases de données SQLite selon les deux étapes suivantes :
+
+- Ajustement des clés primaires pour chacune des tables
+- Définition des clés étrangères dans la table data_com
+
+Après avoir fait ces opérations dans SQLite, on peut voir dans la figure suivante que chaque table contient une clé primaire unique et que la table **compagnies** contient des clés étrangères vers les tables **categories**, **locations** et **types**.
+
+![](sqlite.jpg)
+
+# Question 1.4 - Requêtes sur la nouvelle base de données
+
+## Compagnies fondées entre 1999 et 2001
+
+```{r sql_year, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Connexion à la base de données
+
+mydb <- dbConnect(RSQLite::SQLite(),
+'db_persistence.sqlite')
+
+sql_year <- dbGetQuery(mydb,
+                       paste('SELECT name, url',
+                             'FROM companies',
+                             'WHERE year_founded',
+                             'BETWEEN 1999 AND 2001',
+                             'ORDER BY name'))
+
+# Déconnexion de la base de données
+
+dbDisconnect(mydb)
+
+
+```
+
+Suite à cette requête, on constate qu'il y a **`r nrow(sql_year)`** compagnies qui ont été fondées entre 1999 et 2011 dont on peut voir la liste dans le tableau 12.
+
+`r knitr::kable(view(sql_year), caption = "**Tableau 12 - Liste des compagnies fondées entre 1999 et 2011**")`
+
+## Compagnies présentes en Oregon
+
+```{r sql_oregon, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Connexion à la base de données
+
+mydb <- dbConnect(RSQLite::SQLite(),
+'db_persistence.sqlite')
+
+sql_oregon <- dbGetQuery(mydb,
+                         paste('SELECT name, url, city, state, year_founded',
+                               'FROM companies',
+                               'LEFT JOIN locations ON companies.location_id == locations.location_id',
+                               'WHERE state == "OR"'))
+
+
+# Déconnexion de la base de données
+
+dbDisconnect(mydb)
+
+
+```
+
+Suite à cette requête, on constate qu'il y a **`r nrow(sql_oregon)`** compagnies qui sont présentes en Oregon dont on peut voir la liste dans le tableau 13.
+
+`r knitr::kable(head(sql_oregon, 5), caption = "**Tableau 13 - Liste des compagnies présentes en Oregon**")`
+
