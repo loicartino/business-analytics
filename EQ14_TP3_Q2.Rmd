@@ -1,0 +1,612 @@
+---
+title: "Travail pratique 3"
+subtitle: "<span style='font-sie: 35px'>Question 2 - Optimisation combinatoire</style>" 
+author:
+- Équipe 14
+- Loïc Artino (536 756 361)
+- François L'Écuyer (901 346 493)
+date: "18 novembre 2020"
+output:
+  html_document:
+    code_folding: "hide"
+    highlight: haddock
+    output: html_document
+    theme: default
+    toc : true
+    toc_float: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+
+library(tidyverse)
+library(GA)
+library(tictoc)
+library(viridis)
+# viridis est un outil de gestion des couleurs dans les visules de type ggplot
+
+```
+
+## Question 2.1 - Modélisation: Programme en nombres entiers avec CVXR
+
+```{r modele_glpk, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+model_coverage_dom_set = function(adjacency_matrix) {
+  # TODO: Code du modèle ici
+  
+  # Variable 
+   vX = CVXR::Variable(name = 'X',
+                       rows = nrow(adjacency_matrix),
+                      cols = ncol(adjacency_matrix),
+                      boolean = TRUE)
+
+   objective = CVXR::Minimize(sum(vX))
+   
+   #Contraintes
+   constraints = list(  
+    CVXR::sum_entries(vX, axis = 1) +  CVXR::sum_entries(t(vX), axis = 1) >= 1
+  )
+
+
+  # Objet modèle
+  problem = CVXR::Problem(objective,
+                          constraints)
+
+  result = list(variables = vX,
+              problem = problem)
+
+  return(result)
+}
+```
+
+Nous créons ici une variable vX qui prend la forme d'une matrice semblable à la matrice d'adjacence qui sert d'intrant au modèle. Ainsi, les paramètres _rows_ et _cols_ de la fonction **Variable** sont spécifiés tels qu'ils soient de même dimension que les lignes et les colonnes de la matrice d'adjacence. \n
+
+La fonction objectif correspond à minimiser la somme des valeurs vX du rang, sous la contrainte que les sommes totales des éléments en ligne, d'une part, et des éléments en colonne, d'autre part, soient supérieures ou égales à 1. \n
+En effet, nous cherchons dans ce problème à trouver le nombre minimal de boîtes noires à installer aux intersections, ce qui correspond en d'autres termes, et selon la théories des graphes, à trouver le nombre de sommets contenus dans l'ensemble dominant du graphe correspondant aux intersections des rues dans notre cas. \n
+
+```{r message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# On charge la matrice d'adjacence à tester 
+tiny = readRDS('data/Q2_tiny_interproblem_adjacency_matrix.rds')
+
+# Formulation du problème
+q2_1_glpk = model_coverage_dom_set(tiny)
+
+
+# Résolution du problème
+resolve = function(problem) {
+  
+  prob_result = CVXR::psolve(problem, 
+                             solver = 'GLPK_MI', 
+                             verbose = TRUE,
+                             tm_limit = 120000)
+}
+
+solved_prob_1 = resolve(q2_1_glpk$problem)
+
+
+# Afficher la solution
+library(purrr) 
+solution = tibble(variable = map(CVXR::variables(q2_1_glpk$variables), 'name') %>%
+         as.character(.),
+       valeur = solved_prob_1$value,
+       status = solved_prob_1$status)
+
+solution
+
+
+
+```
+
+## Question 2.2 - Résolution
+
+L'utilisation de la fonction **model_coverage_dom_set** nous permet de créer un objet qui prend une matrice d'adjacence en entrée et retourne une liste contenant les variables d'un côté, ainsi que l'objet sous forme de problème CVXR. Nous créons une seconde fonction **resolve** qui permet de résoudre le problème selon la méthode _GLPK_MI_. Nous ensuite affichons les résultats dans un tableau :
+
+`r knitr::kable(solution)`
+
+Ici, nous voyons que la solution optimale trouvée par GLPK est de **`r solution$valeur`**, ce qui signifique que le nombre _optimal_ de boîtes noires à placer dans cette situation est de trois.
+
+## Question 2.3 - Modélisation générale à l’aide de fonctions et de variables globales
+
+```{r message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# PROBLEME GENERAL
+
+f <- function(x) {
+    var = x
+    -sum(-var)
+}
+
+#C1 : x_i + x_j ≥ 1
+sat_c1 <- function(x) {
+  var = x
+ sum(var) + sum(t(var)) >= 1
+}
+
+#C2 : 0 ≤ x ≤ 1
+sat_c2 <- function(x) {
+  all(0 <= x) & all(x <= 1)
+}
+
+val_obj <- function(x){
+  # Objectif: minimiser f(x)
+  f(x)
+}
+
+is_sol_feasible <- function(x) {
+  sat_c1(x) & sat_c2(x) 
+}
+
+is_sol_x_better_than_y <- function(x,y) {
+  sol_x_better = FALSE
+  if (!is_sol_feasible(x)){
+    sol_x_better = FALSE
+    } else if (is_sol_feasible(x) & !is_sol_feasible(y)){
+      sol_x_better = TRUE
+      } else if (f(x) > f(y)) {
+        sol_x_better = TRUE
+        }
+  sol_x_better
+}
+
+# Test avec x, y et z
+
+
+
+x <- c(0, 0, 1, 1, 0, 0)
+y <- c(0, 0, 1, 1, 0, 1)
+z <- c(1, 1, 1, 1, 1, 1)
+
+# Affichage des valeurs des fonctions objectifs
+
+val_obj_xyz = tibble(Variables = c('x', 
+                                   'y', 
+                                   'z'),
+                     Valeur = c(val_obj(x),
+                                val_obj(y),
+                                val_obj(z)),
+                     'Solution faisable' = c(is_sol_feasible(x),
+                                             is_sol_feasible(y),
+                                             is_sol_feasible(z)))
+
+
+# Comparaison de toutes les possibilités 
+
+compare = matrix(c('x', is_sol_x_better_than_y(x,x), is_sol_x_better_than_y(x,y), is_sol_x_better_than_y(x,z),
+         'y', is_sol_x_better_than_y(y,x), is_sol_x_better_than_y(y,y), is_sol_x_better_than_y(y,z),
+         'z', is_sol_x_better_than_y(z,x), is_sol_x_better_than_y(z,y), is_sol_x_better_than_y(z,z)),
+       nrow = 3,
+       ncol = 4,
+       byrow = TRUE) %>%
+  as_tibble() %>%
+  rename(., 'Variables' = V1, 'x' = V2, 'y' = V3, 'z' = V4)
+
+
+```
+
+Dans cette partie, nous avons généralisé les variables afin de pouvoir les appliquer à n'importe quelle instance. Une _instance_ du problème, dans notre cas, est une matrice d'adjacence autre qui traduit une disposition des intersections de rues différente.
+Par la suite, nous implémentons plusieurs autres fonctions : la fonction **val_obj** correspond à la fonction objectif, elle renvoie une valeur qui ici, sera toujours le nombre minimal de boîtes noires à placer. La fonction **is_sol_feasible** permet de déterminer si une solution en particulier est réalisable, tandis que la fonction **is_sol_x_better_than_y** permet de mettre en compétition deux solutions _x_ et _y_. \n
+Afin de tester nos fonctions nouvellement créées, nous testons les instances x, y et z fournies. Nous compilons les résultats dans un tableau comprenant la valeur objectif, ainsi que la faisabilité de la solution, tandis que le second tableau présente le test toutes les solutions entre elles :
+
+`r knitr::kable(val_obj_xyz)`
+
+La généralisation fonctionne. Nous pouvons constater que chacune des fonctions renvoient le nombre minimal de boîtes à placer et la faisabilité de l'instance. Autre fait à noter, les solutions sont réalisables, mais pas nécessairement optimales.
+
+`r knitr::kable(compare)`
+
+Ici, il est normal que les tests des solutions contre elles-mêmes renvoient un résultat *FALSE*. Nous ignorons donc les résultats en diagonale. D'autre part, on constate que les solutions y et z semblent meilleures que la solution x, mais z semble meilleure que y. En revanche, la colonne relative à la solution z permet de souligner la possibilité de placer une boîte à chaque intersection n'est pas une solution optimale.
+
+## Question 2.4 - Deux algorithmes de recherche aléatoire 
+
+```{r random_searches, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+random_search <- function(domains, max_iterations = 1000,
+                          is_sol_x_better_than_y,
+                          verbose = FALSE) { 
+  best_incumbent <- rep(0, length(domains))
+  best_incumbent_iteration <- 0 
+  curr_iteration <- 1
+  candidate <- rep(0, length(domains))
+  
+  for (curr_iteration in 1:max_iterations) {
+    for (i in 1:length(domains)) { 
+      candidate[i] <- sample(domains[[i]], 1)
+      } 
+    if(is_sol_x_better_than_y(candidate,
+                                  best_incumbent)) {
+        best_incumbent <- candidate
+        best_incumbent_iteration <- curr_iteration 
+        
+        if ( verbose ) {
+          cat('Une nouvelle solution candidate est trouvée à litération ', curr_iteration,
+              ':',
+              as.vector(best_incumbent, mode = 'character'), '\n')
+        } 
+      }
+    curr_iteration <- curr_iteration + 1; 
+    }
+  result <- list(best_incumbent = as.vector(best_incumbent), iteration = best_incumbent_iteration)
+  
+  return(result) 
+  }
+
+random_search_2 <- function(domains,
+                          max_iterations = 100, 
+                          is_sol_x_better_than_y, 
+                          verbose = FALSE) {
+  best_incumbent <- rep(0, length(domains)) 
+  best_incumbent_iteration <- 0 
+  curr_iteration <- 1
+  candidate <- rep(0, length(domains))
+  
+  for (curr_iteration in 1:max_iterations) { 
+    for (i in 1:length(domains)) {
+      value_i <- rnorm(1, mean=length(domains[[i]]) / 3, sd=length(domains[[i]]) / 6) %>% 
+        map(function(x) floor(max(1, x))) %>% 
+        as.integer()
+      
+      candidate[i] <- min(domains[[i]]) + value_i
+    }
+    
+    if(is_sol_x_better_than_y(candidate, best_incumbent)) {
+      best_incumbent <- candidate 
+      best_incumbent_iteration <- curr_iteration 
+      
+      if ( verbose ) {
+        cat('Une nouvelle solution candidate est trouvée à l\'itération ', curr_iteration,
+            ':',
+            as.vector(best_incumbent, mode = 'character'), '\n')
+      }
+      
+    }
+    curr_iteration <- curr_iteration + 1; }
+  
+  result <- list(best_incumbent = as.vector(best_incumbent), iteration = best_incumbent_iteration)
+  
+  return(result)
+}
+```
+
+```{r random_searches_test, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+# Test avec la matrice large
+large = readRDS('data/Q2_large_interproblem_adjacency_matrix.rds')
+
+# Créer une liste contenant les domaines pour la matrice large
+domains_large = list()
+i = 1
+while (i <= dim(large)[1]) {
+  domains_large[[i]] = 0:1
+  i = i+1
+}
+
+return_value_large_1 = random_search(domains_large,
+                                   max_iterations = 100,
+                                   is_sol_x_better_than_y = is_sol_x_better_than_y,
+                                   verbose = T)
+
+return_value_large_2 = random_search_2(domains_large,
+                             max_iterations = 100,
+                             is_sol_x_better_than_y = is_sol_x_better_than_y,
+                             verbose = F)
+
+# Valeurs de la fonction ojectif et faisabilité pour rs 1 et 2
+
+compare2 = tibble(algorithme = c('random_search', 'random_search_2'),
+                  'val_obj' = c(val_obj(return_value_large_1$best_incumbent),
+                              val_obj(return_value_large_2$best_incumbent)),
+                  'is_sol_feasible' = c(is_sol_feasible(return_value_large_1$best_incumbent),
+                                      is_sol_feasible(return_value_large_2$best_incumbent)))
+
+```
+
+Dans cette partie nous développons deux algorithmes de recherche aléatoire. La fonction **random_search** correspond à une recherche à probabilité uniforme, tandis que **random_search_2** cible davantage les solutions possibles. Pour chacune, un maximum de 100 itérations est réalisé et la meilleure solution de cet ensemble est réalisée.
+
+Nous testons ces deux fonctions grâce à la matrice contenue dans le fichier *Q2_large_interproblem_adjacency_matrix.rds*. Tout d'abord, nous créons la liste des domaines possibles pour cette matrice. Ensuite, nous évaluons ces derniers à l'aide de chaque algorithme. Pour le premier, un total de **`r return_value_large_1$iteration`** itérations sont effectuées. La seconde recherche aléatoire renvoie un total de **`r return_value_large_2$iteration`**, bien inférieur à la première recherche, ce qui laisse confirmer que le second algorithme cible plus rapidement un ensemble de solutions favorables.
+
+Enfin, le tableau suivant présente les valeurs objectif et la faisabilité de chacun de meilleurs candidats pour la matrice d'adjacence *Q2_large_interproblem_adjacency_matrix.rds* :
+
+`r knitr::kable(compare2)`
+
+## Question 2.5 - Expérimentations
+
+
+```{r rs_huge, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Chargement des matrices huge
+huge1 = readRDS('data/Q2_huge1_interproblem_adjacency_matrix.rds')
+huge2 = readRDS('data/Q2_huge2_interproblem_adjacency_matrix.rds')
+huge3 = readRDS('data/Q2_huge3_interproblem_adjacency_matrix.rds')
+huge4 = readRDS('data/Q2_huge4_interproblem_adjacency_matrix.rds')
+huge5 = readRDS('data/Q2_huge5_interproblem_adjacency_matrix.rds')
+
+huge_list = list(huge1 = huge1, huge2 = huge2, huge3 = huge3, huge4 = huge4, huge5 = huge5)
+
+# Création des domaines
+domains_huge1 = list()
+domains_huge2 = list()
+domains_huge3 = list()
+domains_huge4 = list()
+domains_huge5 = list()
+
+domain_list_huge = list(domains_huge1, 
+                        domains_huge2,
+                        domains_huge3,
+                        domains_huge4,
+                        domains_huge5)
+
+# Peuplement des listes de domaines
+i = 1
+k = 1
+for (k in 1:5) {
+while (i <= dim(huge_list[[k]])[1]) {
+  domain_list_huge[[k]][[i]] = 0:1
+  i = i+1
+}
+i = 1
+}
+
+# Initialisation des paramètres 
+params_max_iterations = seq(1, 100,1)
+nb_runs = 3
+algo = 'random_search'
+algo2 = 'random_search_2'
+algo3 = 'GLPK_MI'
+
+# Création des tibbles
+experiments_algo_rs1 = tibble(algo = rep("", 5 * nb_runs * length(params_max_iterations)),
+                     no_run = rep(0, 5 * nb_runs * length(params_max_iterations)),
+                     time_sec = rep(0, 5 * nb_runs * length(params_max_iterations)),
+                     instance = rep(0, 5 * nb_runs * length(params_max_iterations)),
+                     obj_val = rep(0, 5 * nb_runs * length(params_max_iterations)),
+                     max_iterations = rep(0, 5 * nb_runs * length(params_max_iterations)),
+                     réalisable = rep(0, 5 * nb_runs * length(params_max_iterations)),
+                     optimale = rep(0, 5 * nb_runs * length(params_max_iterations)))
+
+experiments_algo_rs2 = tibble(algo = rep("", 5 * nb_runs * length(params_max_iterations)),
+                     no_run = rep(0, 5 * nb_runs * length(params_max_iterations)),
+                     time_sec = rep(0, 5 * nb_runs * length(params_max_iterations)),
+                     instance = rep(0, 5 * nb_runs * length(params_max_iterations)),
+                     obj_val = rep(0, 5 * nb_runs * length(params_max_iterations)),
+                     max_iterations = rep(0, 5 * nb_runs * length(params_max_iterations)),
+                     réalisable = rep(0, 5 * nb_runs * length(params_max_iterations)),
+                     optimale = rep(0, 5 * nb_runs * length(params_max_iterations)))
+
+experiments_algo_glpk = tibble(algo = rep("", 5),
+                     no_run = rep(0, 5),
+                     time_sec = rep(0, 5),
+                     instance = rep(0, 5),
+                     obj_val = rep(0, 5),
+                     max_iterations = rep(0, 5),
+                     réalisable = rep(0, 5),
+                     optimale = rep(0, 5))
+
+
+# NOTE : On aurait pu réunir le processus en une seule boucle while. Cependant, compte tenu de la longueur de calcul, il était préférable de scinder les expérimentations en 3 tables, par algorithme, et de réunir leurs résultats à la fin
+
+# La table constituée des 3 tables jointes est enregistrée dans un fichier RDS. 
+
+if (file.exists('experiments_algo.rds') == TRUE) {
+  experiments_algo = readRDS('experiments_algo.rds')
+} else {
+  
+  set.seed(536756)
+  
+  # ALGORITHME RANDOM_SEARCH
+  
+  current_experiment = 1
+  k = 1
+  
+  while (k <= 5) {
+    for (max_iterations in params_max_iterations) {
+      for (curr_run in 1:nb_runs) {
+            
+            tic(quiet = TRUE)
+            return_value1 = random_search(domain_list_huge[[k]],
+                             max_iterations = max_iterations,
+                             is_sol_x_better_than_y = is_sol_x_better_than_y,
+                             verbose = F)
+            chrono = toc(quiet = TRUE)
+    
+    
+            experiments_algo_rs1$algo[current_experiment] = algo 
+            experiments_algo_rs1$max_iterations[current_experiment] = max_iterations 
+            experiments_algo_rs1$no_run[current_experiment] = curr_run 
+            experiments_algo_rs1$time_sec[current_experiment] = chrono$toc - chrono$tic 
+            experiments_algo_rs1$obj_val[current_experiment] =
+              val_obj(return_value1$best_incumbent)
+            experiments_algo_rs1$instance[current_experiment] = k
+            experiments_algo_rs1$réalisable[current_experiment] = 
+              is_sol_feasible(return_value1$best_incumbent)
+            current_experiment = current_experiment + 1
+            }
+      }
+    
+    k = k+1
+    }
+  
+  # ALGORITHME RANDOM_SEARCH_2
+  
+        current_experiment = 1
+        k = 1
+        while (k <= 5) {
+            for (max_iterations in params_max_iterations) {
+              for (curr_run in 1:nb_runs) {
+                    tic(quiet = TRUE)
+                    return_value2 = random_search_2(domain_list_huge[[k]],
+                                     max_iterations = max_iterations,
+                                     is_sol_x_better_than_y = is_sol_x_better_than_y,
+                                     verbose = F)
+                    chrono2 = toc(quiet = TRUE)
+                    
+                    experiments_algo_rs2$algo[current_experiment] = algo2 
+                    experiments_algo_rs2$max_iterations[current_experiment] = max_iterations 
+                    experiments_algo_rs2$no_run[current_experiment] = curr_run 
+                    experiments_algo_rs2$time_sec[current_experiment] = chrono2$toc - chrono2$tic 
+                    experiments_algo_rs2$obj_val[current_experiment] =
+                    val_obj(return_value2$best_incumbent) 
+                    experiments_algo_rs2$instance[current_experiment] = k
+                    experiments_algo_rs2$réalisable[current_experiment] = 
+                      is_sol_feasible(return_value2$best_incumbent)
+                    
+                    current_experiment = current_experiment + 1
+              }
+              }
+          k = k+1
+        }
+        
+        # ALGORITHME GLPK
+        
+        k = 1
+        while (k <= 5) {    
+          glpk_huge = model_coverage_dom_set(huge_list[[k]])
+    
+          tic(quiet = TRUE)
+          glpk_huge_sol  = resolve(glpk_huge$problem)
+          chrono3 = toc(quiet = TRUE)
+          
+          experiments_algo_glpk$algo[k] = algo3
+          experiments_algo_glpk$no_run[k] = k
+          experiments_algo_glpk$instance[k] = k
+          experiments_algo_glpk$obj_val[k] =
+            glpk_huge_sol$value
+          experiments_algo_glpk$time_sec[k] = chrono3$toc - chrono3$tic
+          experiments_algo_glpk$optimale[k] = 
+            ifelse(glpk_huge_sol$status == 'optimal', TRUE, FALSE)
+          
+          k = k+1
+          
+          }
+       
+        # On joint les observations des trois tables ensemble
+        # On change les valeurs 0/1 de la colonne réalisable par TRUE/FALSE
+        
+        # On uniformise la classe de la colonne optimale
+        
+        experiments_algo_glpk = experiments_algo_glpk %>%
+          replace(., 8, TRUE) %>%
+          replace(., 7, TRUE)
+
+    experiments_algo = bind_rows(experiments_algo_rs1 %>%
+                                   replace(., 8, FALSE), 
+                                 experiments_algo_rs2 %>%
+                                   replace(., 8, FALSE)) %>%
+      bind_rows(., experiments_algo_glpk) %>%
+      replace(., 7, ifelse(experiments_algo$réalisable == 1, TRUE, 
+                           ifelse(experiments_algo$algo == 'GLPK_MI', TRUE, FALSE)))
+        
+saveRDS(experiments_algo, file = 'experiments_algo.rds')
+}
+
+# exp = readRDS('data/Q2_experiments_coverint_huge.rds')
+
+```
+
+Il est à présent temps d'exécuter nos algorithmes sur cinq matrices larges qui constituent nos instances. Nous choississons dès lors d'exécuter chacun des algorithmes de recherche aléatoire trois fois pour chaque matrice, avec un nombre maximal de 100 itérations, à l'exception du solveur *GLPK_MI* qui ne sera exécuté qu'une seule fois (une seule itération) sur chaque instance.
+
+Nous commençons par créer une liste de domaines distincts pour chaque matrice de dimensions différentes. Par la suite, nous initialisons certains paramètres en vue de l'exécution. Enfin, nous calculons le temps nécessaire pour la résolution de chaque instance, à chaque itération. Nous créons trois tables, une pour chaque algorithme, que nous fusionnons et ajustons, avant d'enregistrer le résultat final dans un fichier RDS. Nous vérifions également l'absence de valeurs manquantes suite à la fusion des tables (au nombre de **`r sum(is.na(experiments_algo))`**).
+
+Voici les premières lignes du résultat final :
+
+`r knitr::kable(head(experiments_algo, 5))`
+
+*Note : il aurait été pertinent d'exécuter les trois processus dans une seule boucle while, néanmoins, compte tenu de la nature exponentielle de la durée de résolution, il était préférable d'isoler chaque algorithme, afin de limiter d'éventuelles erreurs d'itération dans ce long processus.*
+
+
+## Question 2.6 - Comparaison des méthodes de résolution
+
+```{r message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE, fig.align='center'}
+grouped_experiments_max_iter = experiments_algo %>%
+  group_by(algo, instance, no_run, réalisable, optimale) %>%
+  summarize(avg_time_sec = mean(time_sec),
+            avg_obj_val = mean(obj_val))
+
+
+# Comparaison graphique des trois algorithmes
+
+# Temps d'exécution
+ggplot(grouped_experiments_max_iter) + 
+  geom_col(aes(x = algo,
+               y = avg_time_sec/60,
+               fill = as.factor(instance)),
+           position = "dodge") + 
+  theme_minimal() +
+  scale_fill_viridis(discrete = TRUE) +
+  xlab('Algorithme') +
+  ylab('Temps en minutes') +
+  labs(fill = 'Instance') +
+  ggtitle("Temps moyen de résolution selon l'algorithme") +
+  theme(plot.title = element_text(family = 'Helvetica', face = 'bold', hjust = 0.5),
+        axis.title.y.left = element_text(margin = margin(r = 10, unit = "pt")),
+        strip.text.x = element_text(face = "bold"),
+        axis.text.x = element_text(angle = 90)) +
+  facet_grid(.~réalisable, labeller = label_both)
+
+# Valeur objectif
+ggplot(grouped_experiments_max_iter,
+       aes(x = algo,
+           y = avg_obj_val,
+           fill = as.factor(instance))) +
+  geom_col(position = "dodge") +
+  theme_minimal() +
+  scale_fill_viridis(discrete = TRUE) +
+  xlab('Algorithme') +
+  ylab('Valeur moyenne de fonction objectif') +
+  labs(fill = 'Instance') +
+  ggtitle("Valeur de la fonction objectif en fonction \nde l'algorithme, selon l'instance") +
+  theme(plot.title = element_text(family = 'Helvetica', face = 'bold', hjust = 0.5),
+        axis.title.y.left = element_text(margin = margin(r = 10, unit = "pt")),
+        strip.text.x = element_text(face = "bold"),
+        axis.text.x = element_text(angle = 90)) +
+  facet_grid(.~optimale, labeller = label_both)
+
+```
+\n Les deux graphiques ci-dessus présentent la performance globale des trois algorithmes testés. Dans le premier, qui compare ces derniers en fonction du temps moyen de résolution, selon chaque instance, montre que lorsque la solution était réalisable, le solveur *GLPK_MI* était celui prenant le plus de temps en moyenne pour résoudre chaque instance. 
+
+De plus, l'instance semble avoir un effet sur le temps de résolution : ainsi, l'instance 4 correspond à la matrice d'adjacence la plus importante des cinq, de dimension **`r dim(huge4)[1]`** et de longueur **`r length(huge4)`**, est celle qui affiche le temps moyen de résolution le plus long, de presque 3 minutes. L'algorithme *random_search_2* correspondant à la recherche aléatoire modifiée semble prendre davantage de temps en moyenne, mais est également celui qui a retourné quelques solutions non-réalisables, au nombre de **`r grouped_experiments_max_iter %>% filter(algo == 'random_search_2' & réalisable == FALSE) %>% group_by(algo) %>% summarise(n()) %>% select(2)`**.
+
+Le second graphique expose les valeurs objectives moyennes obtenues pour chaque algorithme, selon l'instance. De plus, il affiche si la solution est optimale ou non. Nous pouvons constater tout d'abord que plus la matrice d'adjacence est importante, plus la valeur est élevée, ce qui correspondrait à un nombre minimal de boîtes noires à placer plus important pour la ville de Montbec. Cette valeur dépend également du nombre d'intersections mutuellement visibles : ainsi, un nombre plus important de boîtes sera à prévoir si peu d'intersections sont visibles entre elles. 
+
+Autre fait saillant, à mettre en perspective avec le graphique précédent, la condition d'optimalité nous montre que les solutions potentielles trouvées par les deux algorithmes de recherche aléatoires sont réalisables en théorie, mais pas forcément optimales, en contraste avec l'algorithme *GLPK_MI*.
+
+```{r time_elapsed, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE, fig.align='center'}
+
+## OPTIONNEL : Visualiser le temps de résolution en fonction du nombre d'itérations
+
+grouped_experiments_max_iter_2 = experiments_algo %>%
+  group_by(algo, max_iterations, instance, no_run, réalisable, optimale) %>%
+  summarize(avg_time_sec = mean(time_sec),
+            avg_obj_val = mean(obj_val)) %>%
+  mutate(max_iterations = replace(max_iterations, max_iterations == 0, 1))
+
+# Intervalles
+bins_iter = seq(0, 100, 5)
+grouped_experiments_max_iter_2$bins_iter = cut(grouped_experiments_max_iter_2$max_iterations,
+                                               bins_iter)
+
+
+ggplot(grouped_experiments_max_iter_2,
+       aes(x = bins_iter,
+           y = avg_time_sec,
+           color = as.factor(algo)
+           )) +
+  geom_boxplot() +
+#  geom_line(position=position_dodge2(width = 1, preserve = "single", padding = 0.5)) +
+  theme_minimal() +
+  scale_y_log10() +
+  scale_color_viridis(discrete = TRUE) +
+  scale_x_discrete(guide = guide_axis(n.dodge = 3)) +
+  xlab("\nNombre d'itérations") +
+  ylab('Temps moyen logarithmique (en secondes)') +
+  labs(color = 'Algorithme') +
+  ggtitle("Temps de résolution moyen en fonction du nombre d'itérations, \nselon l'algorithme") +
+  theme(plot.title = element_text(family = 'Helvetica', face = 'bold', hjust = 0.5),
+        axis.title.y.left = element_text(margin = margin(r = 10, unit = "pt")),
+        strip.text.x = element_text(face = "bold")) +
+facet_grid(algo~.)
+  
+
+```
+
+\n Ici, le but était de souligner un des aspects importants qui entourent la résolution de ce type de problème d'optimisation combinatoire. En effet, le temps ici représenté en ordonnées est mis sur une échelle logarithmique pour montrer que la temps de résolution suit une règle exponentielle lorsque le nombre d'itérations augmente. Ainsi, plus ce dernier est important, le temps de résolution moyen sera important, et ce, à chaque nouvelle itération. 
+
+Enfin, il est à noter que nous ne disposons pas de davantage de données temporelles quant à la résolution des cinq instances avec *GLPK_MI*, puisque nous n'avons réalisé qu'une seule itération pour ce solveur.

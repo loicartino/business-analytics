@@ -1,0 +1,93 @@
+---
+title: "Travail pratique 3"
+subtitle: "<span style='font-size: 35px'>Question 1 - Programmation mathématique</style>" 
+author:
+- Équipe 17
+- Loïc Artino (536 756 361)
+- François L'Écuyer (901 346 493)
+date: "18 novembre 2020"
+output:
+  html_document:
+    code_folding: "hide"
+    highlight: haddock
+    output: html_document
+    theme: default
+    toc : true
+    toc_float: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+library(tidyverse)
+```
+
+```{r message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+ pTaux = matrix( 1 + c(.025, .025, 0, 0, 0,
+                 0, .025, .025, 0, 0,
+                 0, 0, .025, .025, 0,
+                 0, 0, 0, .025, .025,
+                 .04, .04, .04, 0, 0,
+                 0, .04, .04, .04, 0,
+                 0, 0, .04, .04, .04,
+                 .06, .06, .06, .06, 0,
+                 0, .06, .06, .06, .06,
+                 .025, .025, .025, .025, 0,
+                 0, .025, .025, .025, .025,
+                 .025, .025, .04, .04, .04,
+                 .04, .04, .04, .025, .025), nrow = 13,
+               ncol = 5,
+               byrow = TRUE)
+
+
+pExpend = c(55000, 192500, 0, 110000, 165000)
+pRevenue = c(55000, 0, 60000, 0, 0)
+pCapital = 550000
+
+
+# Création des variables
+vX = CVXR::Variable(name = 'X_1',
+                    rows = 13,
+                    cols = 5)
+
+
+# Fonction objectif
+objective = CVXR::Maximize(sum(pTaux * vX))
+
+# Contraintes
+constraints = list(
+  CVXR::sum_entries(t(vX), axis = 1) <= pCapital - pExpend,
+  vX >= 0
+)
+
+# Formulation du problème
+problem <- CVXR::Problem(objective, constraints)
+
+# Résoudre
+result <- CVXR::psolve(problem,
+                       solver = 'GLPK_MI',
+                       verbose = TRUE)
+
+result$status
+result$getValue(vX)
+result$value
+
+```
+
+```{r message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+
+```
+
+```{r message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+```
+
+```{r message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+```
+
