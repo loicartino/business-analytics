@@ -1,0 +1,353 @@
+---
+title: "Travail pratique 1"
+subtitle: "<span style='font-size: 35px'>Question 2 - Météorologie, absences virtuelles et mesures exceptionnelles</style>" 
+author:
+- Équipe 17
+- Loïc Artino (536 756 361)
+- François L'Écuyer (901 346 493)
+date: "7 octobre 2020"
+output:
+  html_document:
+    code_folding: "hide"
+    highlight: haddock
+    output: html_document
+    theme: default
+    toc : true
+    toc_float: true
+    toc_depth: 1
+---
+```{r librairies, include=FALSE}
+
+### Chargement des librairies si nécessaire
+
+packages<-function(x){
+  x<-as.character(match.call()[[2]])
+  if (!require(x,character.only=TRUE)){
+    install.packages(pkgs=x,repos="http://cran.r-project.org")
+    require(x,character.only=TRUE)
+  }
+}
+packages(tidyverse)
+packages(rmarkdown)
+packages(lubridate)
+# lubridate est un outil pour manipuler des données en format date
+packages(viridis)
+# viridis est un outil de gestion des couleurs dans les visules de type ggplot
+
+```
+
+# Question 2.1 - Charger les données d’Environnement Canada
+
+Lorsque des employés travaillent à distance, il est toujours intéressant de connaître leurs habitudes de travail. Certaines entreprises adaptent leur organisation du travail pour favoriser une rémunération selon l'atteinte d'objectifs tandis que d'autres préfèrent une rémunération selon les heures travaillées. Avec cette forme de rémunération, il devient nécessaire de trouver des façons de contrôler les heures travaillées pour s'assurer d'en avoir pour son argent. Ainsi, l'objectif de ce travail est de vérifier indirectement l'assiduité de quatre programmeurs d'une entreprise informatique à partir de leurs connexions sur le serveur de l'entreprise où ils doivent effectuer leur travail. Pour ce faire, l'analyse cherchera à répondre aux trois questions suivantes :
+
+- Est-ce que le jour de la semaine a un impact sur l'assiduité ? 
+- Est-ce que les mesures exceptionnelles ont eu un impact sur l'assiduité ?
+- Est-ce que la météo a un impact sur l'assiduité ?
+
+## *Liste partielle des données avec des valeurs manquantes*
+
+```{r enviro_can, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Téléchargement des données d'Environnement Canada
+
+data_env_can_yqb_path <- file.path('data/meteo_log/env_can')
+
+tmp_all_files =
+  list.files(path = data_env_can_yqb_path,
+             recursive = FALSE, pattern = '*.csv')
+
+tmp_all_paths = file.path(data_env_can_yqb_path, tmp_all_files)
+
+data_env_can = tmp_all_paths %>% 
+  map(read_csv) %>% 
+  reduce(rbind)
+
+# Sélection et triage des colonnes
+
+df = data_env_can %>%
+  select(`Date/Time`, Year, Month, Day, Time, `Temp (°C)`, Weather) %>%
+  arrange('Date/Time')
+
+# Filtre des colonnes avec les lignes contenant des valeurs manquantes seulement
+
+df_missings = df %>%
+  select(`Date/Time`, Year, Month, Day, Time, `Temp (°C)`, Weather) %>%
+  filter_all(., any_vars(is.na(.)))
+
+```
+
+Les données pour ce travail proviennent d'un API d'Environnement Canada (Canada 2019) contenant plusieurs fichiers de format CSV. Le téléchargement a permis de collecter **`r nrow(df)`** observations. Cependant, un message d'erreur est apparu lors de l'importation nous indiquant qu'ils y avaient des erreurs dans le fichier de données. Lors de la vérification, nous avons pu constater que cela était dû au fait qu'il y avait **`r sum(is.na(df))`** valeurs manquantes explicites dans la table de données. On peut voir au Tableau 1, une partie des données importées avec ces valeurs manquantes. 
+
+`r knitr::kable(head(df_missings, 3), caption = "**Tableau 1 - Liste partielle des données météo avec des valeurs manquantes**")`
+
+# Question 2.2 - Nettoyer les données d’Environnement Canada
+
+Il est assez commun que les bases de données contiennent des données avec des erreurs, ne soient pas dans le format voulu, ne soient pas toutes nécessaires ou soient tout simplement absentes. À cette étape, nous désirons nettoyer les données en remplaçant les valeurs manquantes et filtrer les heures entre 8h00 et 19h00.
+
+## *Liste partielle des données sans valeurs manquantes*
+
+```{r NA filling, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Remplacement des NA par la valeur précédente ou suivante
+
+df_filled = df %>%
+  fill(`Temp (°C)`, Weather, .direction = "updown")
+
+```
+
+Puisqu’il s’agit de météorologie et que les données sont ordonnées par date et par heure, nous supposons qu’une valeur manquante peut être remplacée par la valeur non vide précédente ou suivante selon sa position dans la table. On peut voir au Tableau 2, une liste partielle de la nouvelle table épurée des données manquantes où l'analyse nous a permis de constater qu'il subsistait **`r sum(is.na(df_filled))`** valeur(s) manquante(s) sur les **`r nrow(df_filled)`** observations.
+
+`r knitr::kable(head(df_filled, 3), caption = "**Tableau 2 - Liste partielle de la nouvelle table épurée des données météo manquantes**")`
+
+## *Liste partielle des données entre 8h00 et 19h00*
+
+```{r eighttonineteen, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Filtrage des heures de travail de 8h00 à 19h00
+
+df_filled2 = df_filled %>%
+  mutate(Heure = hour(Time)) %>%
+  filter(between(Heure, 8, 19))
+
+```
+
+On peut aussi filtrer la météo entre 8h00 et 19h00 (inclusivement) puisque que les employés ne se connectent sur le serveur que le jour. Le soir entre 20 heures et minuit et peu avant 8 heure le matin, il y a des maintenances et pour le reste de la nuit, la puissance de calcul est louée à d’autres compagnies. Après le filtrage, il reste **`r nrow(df_filled2)`** observations dont on peut voir au Tableau 3, une liste partielle des heures travaillées entre 8h00 et 19h00.
+
+`r knitr::kable(head(df_filled2, 3), caption = "**Tableau 3 - Liste partielle des données météo entre 8h00 et 19h00**")`
+
+# Question 2.3 - Charger les données de connexion des employés au serveur
+
+```{r loggings, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Chargement de la table des connexions d'employés 
+
+logged_all = read_csv("data/meteo_log/logged_all.csv") %>%
+  arrange('Date/Time')
+
+```
+
+À cette étape, nous voulons télécharger les données provenant du journal des connexions sur le serveur pour observer l'assiduité des quatre programmeurs selon la journée et l'heure de la journée. Suite au téléchargement du fichier CSV, on constate que ce fichier contient **`r nrow(logged_all)`** observations dont on peut voir une liste partielle au Tableau 4.
+
+`r knitr::kable(head(logged_all, 3), caption = "**Tableau 4 - Liste partielle des connexions au serveur des programmeurs**")`
+
+# Question 2.4 - Nettoyer les données horaires des employés
+
+```{r tidy, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Tabuler les données et création d'un identifiant unique pour chaque employé
+
+tidy_logged = logged_all %>%
+  gather(key = "employee", value = "login", `log_emp1`, `log_emp2`, `log_emp3`, `log_emp4`) %>%
+  group_by(employee) %>%
+  mutate(ID = cur_group_id())
+
+```
+
+Comme mentionné précédemment, il est assez commun que les bases de données contiennent des données avec des erreurs, ne soient pas dans le format voulu, ne soient pas toutes nécessaires ou soient tout simplement absentes. À cette étape, nous désirons nettoyer la table des données en la mettant sous une forme tabulée et en créant un identifiant unique (nombre entier) pour chaque programmeur. La résultante de cette opération est une nouvelle table contenant **`r nrow(tidy_logged)`** dont on peut voir une liste partielle au Tableau 5. 
+
+`r knitr::kable(head(tidy_logged, 3), caption = "**Tableau 5  - Liste partielle tabulée des connexions des programmeurs avec un identifiant unique**")`
+
+# Question 2.5 - Identifier les heures de beau temps
+
+```{r weather, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Création d'une variable booléenne indicatrice du temps
+
+df_bool = df_filled2 %>% 
+  mutate(., Beau_temps = ifelse(`Temp (°C)` < 18.0, "Non",
+                                ifelse(str_detect(Weather, 
+                                                  "Rain|Fog|Snow|Drizzle|Thunderstorm|Ice|Freezing"), "Non", "Oui"))
+         )
+```
+
+Puisqu'une partie de notre analyse porte sur l'impact du beau temps sur l'assiduité des programmeurs, nous désirons créer une variable nous permettant d'identifier s'il faisait beau selon la date et l'heure. Pour ce faire, nous avons créé une variable booléenne pour indiquer s'il faisait beau ou non à chaque heure de toutes les journées. Suite à cette opération, on constate qu'il y a **`r count(filter(df_bool, Beau_temps == "Oui"))`** heures de beau temps sur **`r nrow(df_bool)`** heures au total pendant la période allant du 1 janvier 2018 au 31 août 2020 de 8h00 à 19h00, dont on peut voir une liste partielle dans le Tableau 6.
+
+`r knitr::kable(head(df_bool, 3), caption = "**Tableau 6  - Liste partielle des jours selon la météo**")`
+
+# Question 2.6 - Identifier la période critique de mesures exceptionnelles
+
+```{r exception, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Création de la table Booléenne pour les exceptions 
+
+df_excep = df_bool %>% 
+  mutate(., Exception = ifelse(between(as.numeric(Month), 3, 6) & Year == 2020, "Oui", "Non")
+         )
+
+```
+
+Une partie de l'analyse porte aussi sur la période du début mars à la fin juin 2020 où des mesures exceptionnelles ont été mis en place pour contenir la propagation de la pandémie de Covid-19. Pour ce faire, nous avons créé une variable booléenne pour indiquer les jours et les heures se situant pendant cette période. Suite à cette opération, nous avons identifié **`r count(filter(df_excep, Exception == "Oui"))`** heures pendant la période où des mesures exceptionnelles étaient en vigueur sur les **`r nrow(df_excep)`** heures au total pendant la période allant du 1 janvier 2018 au 31 août 2020 de 8h00 à 19h00. On peut voir une liste partielle de ces jours et heures dans le Tableau 7.
+
+`r knitr::kable(head(df_excep, 3), caption = "**Tableau 7  - Liste partielle des heures d'exception**")`
+
+# Question 2.7 - Combiner la météo et les connexions
+
+```{r jointure, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE}
+
+# Jointure des tables de la météo et les connexions au serveur
+
+df_joined = df_excep %>%
+  inner_join(tidy_logged, by = c("Date/Time" = "Date/Time"))
+
+```
+
+À cette étape, nous désirons constituer une table combinant les **`r nrow(tidy_logged)`** observations de la table contenant les données sur les connexions au serveur avec les **`r nrow(df_excep)`** observations de la table contenant les données sur la météo. Suite à la jointure de ces tables, une nouvelle table contenant **`r nrow(df_joined)`** observations avec **`r sum(is.na(df_joined))`** valeur(s) manquante(s) et qu'on peut voir patiellement au Tableau 8. 
+
+`r knitr::kable(head(df_joined, 3), caption = "**Tableau 8  - Liste partielle des données fusionnées**")`
+
+# Question 2.8 - Est-ce que la température ou les mesures exceptionnelles ont un impact?
+
+Suite à toutes ces opérations, nous sommes maintenant en mesure de tenter de répondre à nos trois questions :
+
+- Est-ce que le jour de la semaine a un impact sur l'assiduité ? 
+- Est-ce que les mesures exceptionnelles ont eu un impact sur l'assiduité ?
+- Est-ce que la météo a un impact sur l'assiduité ?
+
+Pour ce faire, l'analyse s'est faite principalement de façon visuelle avec l'aide de différents graphiques.
+
+## *Impact du jour de la semaine sur l'assiduité*
+
+```{r graphic1a, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE, fig.align='center'}
+
+# Création des différentes légendes des graphiques subséquents
+
+nom_empl = c("Employé 1", "Employé 2", "Employé 3", "Employé 4")
+names(nom_empl) = c(1, 2, 3, 4)
+bt_label = c("Beau temps", "Mauvais temps")
+names(bt_label) = c("Oui", "Non")
+
+# Agrégation pour les premiers graphiques
+
+agg1 = df_joined %>% 
+  filter(login == TRUE) %>%
+  mutate(., wday = wday(`Date/Time`, label = TRUE)) %>%
+  group_by(Year, wday, ID, weekend) %>%
+  count(login)
+  
+# Affichage du graphique 1a
+
+ggplot(agg1, aes(x = wday, y = n, group = Year, color = as.factor(Year))) +
+  geom_smooth(se = FALSE) + 
+  scale_color_viridis(discrete = TRUE) +
+  labs(x = "\nJour", y = "Nombre moyen de connexions sur le serveur", color = "Année") +
+  theme_minimal() +
+  ggtitle("Figure 1a - Nombre de connexions sur le serveur selon le jour de la semaine") +
+  theme(plot.title = element_text(family = 'Helvetica', face = 'bold', hjust = 0.5),
+        axis.title.y.left = element_text(margin = margin(r = 10, unit = "pt")),
+        strip.text.x = element_text(face = "bold"))
+
+```
+
+On peut voir clairement à la Figure 1a que la journée a un impact important sur l'assiduité des employés en terme de connexions sur le serveur. Globalement, les employés se connectent beaucoup plus la semaine avec un petit relâchement vers la fin de la semaine mais on remarque surtout que les connexions sur le serveurs sont beaucoup moins nombreuses la fin de semaine. Cela est apparent peu importe l'année à laquelle on se réfère même si on peut voir qu'il y a eu beaucoup moins de connexions sur le serveur en 2020 à cause de la période étudiée (8 mois seulement) et, comme on va le voir plus loin, les mesures exceptionnelles qui ont réduit considérablement les connexions sur le serveur. 
+
+```{r graphic1b, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE, fig.align='center'}
+
+# Affichage du graphique 1b
+
+ggplot(agg1, aes(x = wday, y = n, group = Year, color = as.factor(Year))) +
+  geom_line() + 
+  scale_color_viridis(discrete = TRUE) +
+  labs(x = "Jour", y = "Nombre de connexions sur le serveur", color = "Année") +
+  theme_minimal() +
+  ggtitle("Figure 1b - Nombre de connexions sur le serveur selon le jour de la semaine (par employé)") +
+  theme(plot.title = element_text(family = 'Helvetica', face = 'bold', hjust = 0.5),
+        axis.title.y.left = element_text(margin = margin(r = 10, unit = "pt")),
+        strip.text.x = element_text(face = "bold")) +
+  facet_wrap(~ID, labeller = labeller(ID = nom_empl))
+
+```
+
+On remarque cependant que cela est très différent d'un employé à l'autre. Alors que les employés 1 et 2 se connectent régulierement sur le serveur peu importe la journée de la semaine, les employés 3 et 4 ne se connectent jamais sur le serveur la fin de semaine comme on peut le voir sur la Figure 1b.
+
+## *Impact des mesures exceptionnelles sur l'assiduité*
+
+```{r graphic2a, message=FALSE, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE, fig.align='center'}
+
+#Agrégation pour les seconds graphiques
+
+agg2 = df_joined %>% 
+  filter(login == TRUE) %>%
+  group_by(Year, Month, ID) %>%
+  count(login)
+
+# Graphique 2a
+
+ggplot(agg2, aes(x = Month, y = n, group = Year, color = as.factor(Year))) +
+  geom_smooth(se = FALSE) +
+  scale_color_viridis(discrete = TRUE) +
+  labs(x = "Mois", y = "Nombre moyen de connexions sur le serveur", color = "Année") +
+  theme_minimal() +
+  ggtitle("Figure 2a - Nombre moyen de connexions sur le serveur par mois") +
+  theme(plot.title = element_text(family = 'Helvetica', face = 'bold', hjust = 0.5),
+        axis.title.y.left = element_text(margin = margin(r = 10, unit = "pt")))
+
+```
+
+On peut voir à la Figure 2a qu'il est évident que les mesures exceptionnelles ont eu un impact négatif très marqué sur l'assiduité en terme de connexions sur le serveur. En comparaison aux années 2018 et 2019, on peut voir qu'il y a eu une baisse des connexions sur le serveur des programmeurs à partir du mois de mars 2020 jusqu'au mois de juin 2020. 
+
+```{r graphic2b, message=FALSE, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE, fig.align='center'}
+
+# Graphique 2b
+
+ggplot(agg2, aes(x = Month, y = n, group = Year, color = as.factor(Year))) +
+  geom_line() +
+  scale_color_viridis(discrete = TRUE) +
+  labs(x = "\nMois", y = "Nombre de connexions sur le serveur", color = "Année") +
+  theme_minimal() +
+  ggtitle("Figure 2b - Nombre de connexions sur le serveur par mois (par employé)") +
+  theme(plot.title = element_text(family = 'Helvetica', face = 'bold', hjust = 0.5),
+        axis.title.y.left = element_text(margin = margin(r = 10, unit = "pt")),
+        strip.text.x = element_text(face = "bold")) +
+  facet_wrap(~ID, labeller = labeller(ID = nom_empl))
+
+```
+
+On remarque cependant que les mesures execeptionnelles n'ont pas eu le même impact sur tous les programmeurs. On peut voir à la Figure 2b que le programmeur 3 n'a pas été affecté par les mesures exceptionnelles en terme de connexions sur le serveur comparativement à ses collègues de travail qui l'ont été beaucoup plus. Même le programmeur 1 a été beaucoup moins impacté par les mesures exepcetionnelles que les programmeurs 3 et 4 qui quasiment cessé de travailler pendant cette période. 
+
+## *Impact de la météo sur l'assiduité*
+
+```{r graphic3a, message=FALSE, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE, fig.align='center'}
+
+# Agrégation pour les troisièmes graphiques
+
+agg3 = df_joined %>%
+  filter(login == TRUE) %>%
+  mutate(., Jour = wday(`Date/Time`, label = TRUE)) %>%
+  group_by(Year, Month, ID, Beau_temps) %>%
+  count()
+
+# Graphique 3a
+
+ggplot(agg3, aes(x = as.factor(Month), y = n, group = as.factor(Year), color = as.factor(Year))) +
+  geom_smooth(se = FALSE) +
+  scale_color_viridis(name = "Année", discrete = TRUE) +
+  labs(x = "\nMois", y = "Nombre moyen de connexions sur le serveur") +
+  theme_minimal() +
+  ggtitle("Figure 3a - Nombre moyen de connexions sur le serveur par mois selon la météo") +
+  theme(plot.title = element_text(family = "Helvetica", face = "bold", hjust = 0.5),
+        axis.title.y.left = element_text(margin = margin(r = 10, unit = "pt")),
+        strip.text.x = element_text(face = "bold")) +
+  facet_wrap(~Beau_temps, labeller = labeller(Beau_temps = bt_label))
+
+```
+
+Comme peut le voir sur la Figure 3a, les journées de beau temps se produisent entre les mois de mai et septembre puisque c'est pendant cette période que la température atteint habituellement 18 degré Celsius. Il est donc intéressant de constater que pendant cette période le nombre de connexions moyen est plus élevé lors des journées de beau temps. On peut donc affirmer qu'il existe bien un effet marqué de la température sur le nombre de connexions sur le serveur d'un point de vue global.
+
+```{r graphic3b, message=FALSE, message=FALSE, results='hide', comment=NA, warning=FALSE, echo=TRUE, fig.align='center'}
+
+# Graphique 3b
+
+ggplot(agg3, aes(x = as.factor(Month), y = n, group = as.factor(Year), color = as.factor(Year))) +
+  geom_line() +
+  scale_color_viridis(name = "Année", discrete = TRUE) +
+  labs(x = "\nMois", y = "Nombre de connexions sur le serveur") +
+  theme_minimal() +
+  ggtitle("Figure 3b - Nombre de connexions sur le serveur par mois selon la météo (par employé)") +
+  theme(plot.title = element_text(family = "Helvetica", face = "bold", hjust = 0.5),
+        axis.title.y.left = element_text(margin = margin(r = 10, unit = "pt")),
+        strip.text.x = element_text(face = "bold"),
+        strip.text.y = element_text(face = "bold")) +
+  facet_grid(ID~Beau_temps, labeller = labeller(ID = nom_empl, Beau_temps = bt_label))
+```
+
+Alors qu'on remarque habituellement une baisse des connexions pendant la période du moins d'avril à septembre (cf Figure 2a), on peut voir sur la Figure 3b que la température n'affecte pas l'assiduité de tous les employés de la même façon. Alors que les employés 1 et 2 maintiennent un niveau constant mais très bas de connexions sur le serveur pendant les jours de beau temps, il semble que les employés 3 et 4 se connectent plus souvent au serveur quand il fait beau, ce qui explique la constance observée de leur assiduité tout au long de l'année. 
